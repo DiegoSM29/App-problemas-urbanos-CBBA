@@ -1,0 +1,361 @@
+import React, { useState } from 'react';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { colors, categories } from '../theme/colors';
+import { useAuth } from '../context/AuthContext';
+import { useReports } from '../context/ReportsContext';
+import { hasSupabase } from '../services/supabase';
+import CityMap from '../components/MapView';
+
+export default function ReportFormScreen({ onSubmit }) {
+  const { user } = useAuth();
+  const { create } = useReports();
+
+  const [category, setCategory] = useState('Vialidad');
+  const [title, setTitle] = useState('');
+  const [place, setPlace] = useState('');
+  const [coords, setCoords] = useState(null);
+  const [image, setImage] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const pickImage = async () => {
+    setError('');
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError('Se necesita permiso para acceder a tus imágenes.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.4,
+        base64: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset) return;
+      const uri = asset.base64
+        ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+        : asset.uri;
+      setImage(uri);
+    } catch (e) {
+      setError('No se pudo adjuntar la imagen.');
+    }
+  };
+
+  const submit = async () => {
+    if (!title.trim()) {
+      setError('Describe brevemente el problema.');
+      return;
+    }
+    if (!place.trim()) {
+      setError('Indica la zona, calle o referencia.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await create({
+        title: title.trim(),
+        category,
+        place: place.trim(),
+        lat: coords?.latitude ?? null,
+        lng: coords?.longitude ?? null,
+        user_id: user?.id,
+        image_url: image,
+      });
+      setTitle('');
+      setPlace('');
+      setCoords(null);
+      setImage(null);
+      onSubmit('Mis reportes');
+    } catch (e) {
+      setError(e.message || 'No se pudo enviar el reporte.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.flex}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.eyebrow}>NUEVA INCIDENCIA</Text>
+        <Text style={styles.title}>Reportar un problema urbano</Text>
+        <Text style={styles.description}>
+          Tu reporte ayuda a priorizar las necesidades de cada zona de
+          Cochabamba.
+        </Text>
+
+        <Text style={styles.fieldLabel}>Categoría</Text>
+        <View style={styles.categories}>
+          {categories
+            .filter((c) => c !== 'Todos')
+            .map((c) => {
+              const active = category === c;
+              return (
+                <Pressable
+                  key={c}
+                  onPress={() => setCategory(c)}
+                  style={[styles.category, active && styles.categoryActive]}
+                >
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      active && styles.categoryTextActive,
+                    ]}
+                  >
+                    {c}
+                  </Text>
+                </Pressable>
+              );
+            })}
+        </View>
+
+        <Text style={styles.fieldLabel}>Descripción del problema</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Ej. Bache grande en la avenida..."
+          placeholderTextColor={colors.placeholder}
+          multiline
+          value={title}
+          onChangeText={setTitle}
+          editable={!busy}
+        />
+
+        <Text style={styles.fieldLabel}>Ubicación</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Zona, calle o referencia"
+          placeholderTextColor={colors.placeholder}
+          value={place}
+          onChangeText={setPlace}
+          editable={!busy}
+        />
+
+        <Text style={styles.fieldLabel}>Ubicación en el mapa</Text>
+        <CityMap
+          reports={[]}
+          onSelect={(c) => setCoords(c)}
+          height={240}
+        />
+        {coords ? (
+          <Text style={styles.coords}>
+            Ubicación marcada: {coords.latitude.toFixed(4)},{' '}
+            {coords.longitude.toFixed(4)}
+          </Text>
+        ) : (
+          <Text style={styles.coordsHint}>
+            Opcional: presiona el mapa para marcar el punto exacto (en
+            Android/iOS).
+          </Text>
+        )}
+
+        <Text style={styles.fieldLabel}>Evidencia fotográfica (opcional)</Text>
+        {image ? (
+          <View style={styles.imageWrap}>
+            <Image source={{ uri: image }} style={styles.image} resizeMode="cover" />
+            <Pressable
+              style={styles.removeImage}
+              onPress={() => setImage(null)}
+              disabled={busy}
+            >
+              <Text style={styles.removeImageText}>Quitar imagen</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            style={[styles.imageButton, busy && styles.disabled]}
+            onPress={pickImage}
+            disabled={busy}
+          >
+            <Text style={styles.imageButtonText}>+ Adjuntar imagen</Text>
+          </Pressable>
+        )}
+
+        {!hasSupabase && (
+          <Text style={styles.demoNote}>
+            Modo demostración: el reporte se guarda en memoria y aparecerá en
+            "Mis reportes".
+          </Text>
+        )}
+
+        {!!error && <Text style={styles.error}>{error}</Text>}
+
+        <Pressable
+          style={[styles.submit, busy && styles.disabled]}
+          onPress={submit}
+          disabled={busy}
+        >
+          <Text style={styles.submitText}>
+            {busy ? 'Enviando…' : 'Enviar reporte'}
+          </Text>
+        </Pressable>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+  container: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 34,
+  },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.6,
+    fontWeight: '900',
+    color: colors.accent,
+    marginBottom: 6,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  description: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.textMuted,
+    marginBottom: 20,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  categories: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  category: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 9,
+    backgroundColor: '#F3F7F8',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  categoryActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  categoryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  categoryTextActive: {
+    color: '#FFFFFF',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: colors.text,
+    backgroundColor: '#FFFFFF',
+    textAlignVertical: 'top',
+  },
+  coords: {
+    fontSize: 11,
+    color: colors.success,
+    marginTop: 8,
+    fontWeight: '700',
+  },
+  coordsHint: {
+    fontSize: 11,
+    color: colors.textFaint,
+    marginTop: 8,
+  },
+  demoNote: {
+    color: colors.purple,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  imageButton: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderStyle: 'dashed',
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: 'center',
+    backgroundColor: '#F7FBFD',
+  },
+  imageButtonText: {
+    color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  imageWrap: {
+    gap: 8,
+  },
+  image: {
+    width: '100%',
+    height: 200,
+    borderRadius: 10,
+    backgroundColor: colors.hero,
+  },
+  removeImage: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
+  removeImageText: {
+    color: colors.danger,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  error: {
+    color: colors.danger,
+    fontSize: 12,
+    marginTop: 12,
+  },
+  submit: {
+    marginTop: 20,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  disabled: {
+    opacity: 0.6,
+  },
+  submitText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+});
