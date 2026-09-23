@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Incidencias Urbanas CBBA",
+    "slug": "incidencias-urbanas-cbba",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite adjuntar una foto como evidencia de la incidencia.",
+          "cameraPermission": "Permite tomar una foto como evidencia de la incidencia."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Permite marcar la ubicación exacta de la incidencia en el mapa."
+        }
+      ]
+    ],
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "android": {
+      "package": "com.cbba.incidencias",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.cbba.incidencias"
+    }
+  }
+}
