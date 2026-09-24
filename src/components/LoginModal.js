@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { colors } from '../theme/colors';
 import { useAuth } from '../context/AuthContext';
-import { exampleAccounts } from '../services/db';
+import { exampleAccounts } from '../services/auth';
 
 export default function LoginModal({ visible, onClose }) {
   const { login } = useAuth();

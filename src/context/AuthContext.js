@@ -8,34 +8,53 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Restaura la sesión guardada (si recargas la página sigues dentro).
+  // Sincroniza el estado con la sesión de Supabase Auth y carga el perfil.
   useEffect(() => {
     let active = true;
 
+    const sync = async (session) => {
+      const nextUser = session?.user ?? null;
+      if (!active) return;
+      setUser(nextUser);
+      if (nextUser) {
+        const p = await authService.fetchProfile(nextUser.id);
+        if (active) {
+          setProfile(
+            p ?? {
+              id: nextUser.id,
+              email: nextUser.email,
+              role: 'Ciudadano',
+            }
+          );
+        }
+      } else {
+        setProfile(null);
+      }
+    };
+
     (async () => {
       try {
-        const existing = await authService.getSessionUser();
-        if (active && existing) {
-          setUser(existing);
-          setProfile(existing);
-        }
+        const session = await authService.getSession();
+        await sync(session);
       } finally {
         if (active) setLoading(false);
       }
     })();
 
+    const { data: subscription } = authService.onAuthStateChange((session) => {
+      sync(session);
+    });
+
     return () => {
       active = false;
+      subscription?.unsubscribe();
     };
   }, []);
 
   const value = useMemo(() => {
-    // Entra con código/correo + contraseña. El rol lo define la cuenta.
     const login = async (identifier, password) => {
-      const nextUser = await authService.signIn(identifier, password);
-      const p = (await authService.fetchProfile(nextUser.id)) ?? nextUser;
-      setUser(nextUser);
-      setProfile(p);
+      await authService.signIn(identifier, password);
+      // El usuario/perfil se actualiza vía onAuthStateChange.
     };
 
     const logout = async () => {

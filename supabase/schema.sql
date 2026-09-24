@@ -192,3 +192,43 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ============================================================
+-- App conectada a Supabase (requisitos del cliente)
+-- ============================================================
+
+-- Código de cuenta (p. ej. CBA-1001, ADM-0001, TEC-0001) para login por código
+alter table public.profiles add column if not exists codigo text;
+
+-- RPC: resuelve un código a email sin sesión activa (RLS impide leer perfiles anónimos)
+create or replace function public.find_email_by_codigo(p_codigo text)
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select email from public.profiles where lower(codigo) = lower(p_codigo) limit 1;
+$$;
+
+-- Bucket público para imágenes de incidencias
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('incidencias', 'incidencias', true, 10485760)
+on conflict (id) do nothing;
+
+drop policy if exists "iu_storage_insert" on storage.objects;
+create policy "iu_storage_insert"
+  on storage.objects for insert
+  to anon, authenticated
+  with check (bucket_id = 'incidencias');
+
+drop policy if exists "iu_storage_update" on storage.objects;
+create policy "iu_storage_update"
+  on storage.objects for update
+  to anon, authenticated
+  using (bucket_id = 'incidencias');
+
+drop policy if exists "iu_storage_delete" on storage.objects;
+create policy "iu_storage_delete"
+  on storage.objects for delete
+  to anon, authenticated
+  using (bucket_id = 'incidencias');

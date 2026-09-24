@@ -30,6 +30,7 @@ export default function ReportFormScreen({ onSubmit }) {
   const [place, setPlace] = useState('');
   const [coords, setCoords] = useState(null);
   const [image, setImage] = useState(null);
+  const [imageAsset, setImageAsset] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -70,6 +71,7 @@ export default function ReportFormScreen({ onSubmit }) {
       ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
       : asset.uri;
     setImage(uri);
+    setImageAsset(asset);
   };
 
   const pickImage = async () => {
@@ -135,11 +137,13 @@ export default function ReportFormScreen({ onSubmit }) {
         lng: coords?.longitude ?? null,
         user_id: user?.id,
         image_url: image,
+        imageAsset,
       });
       setTitle('');
       setPlace('');
       setCoords(null);
       setImage(null);
+      setImageAsset(null);
       onSubmit('Mis reportes');
     } catch (e) {
       setError(e.message || 'No se pudo enviar el reporte.');
@@ -257,7 +261,10 @@ export default function ReportFormScreen({ onSubmit }) {
             <Image source={{ uri: image }} style={styles.image} resizeMode="cover" />
             <Pressable
               style={styles.removeImage}
-              onPress={() => setImage(null)}
+              onPress={() => {
+                setImage(null);
+                setImageAsset(null);
+              }}
               disabled={busy}
             >
               <Text style={styles.removeImageText}>Quitar imagen</Text>
@@ -283,8 +290,8 @@ export default function ReportFormScreen({ onSubmit }) {
         )}
 
         <Text style={styles.demoNote}>
-          El reporte se guarda en la base de datos local y aparecerá en
-          "Mis reportes".
+          Tu reporte se guarda en la nube de Supabase y aparecerá en "Mis
+          reportes".
         </Text>
 
         {!!error && <Text style={styles.error}>{error}</Text>}
