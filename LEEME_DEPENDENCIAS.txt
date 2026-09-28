@@ -1,0 +1,25 @@
+INSTRUCCIONES PARA USAR EL PROYECTO COMPRIMIDO
+
+Para reducir el tamaño se excluyó únicamente la carpeta node_modules,
+que contiene las dependencias instaladas. Los demás archivos originales
+se conservan sin cambios, incluyendo el código, la configuración, los
+archivos SQL y package-lock.json.
+
+Antes de ejecutar el proyecto:
+1. Instala Node.js y npm si aún no los tienes, en una versión compatible
+   con el proyecto.
+2. Extrae por completo este ZIP.
+3. Abre una terminal dentro de la carpeta Incidencias_Urbanas_Last,
+   donde se encuentra package.json.
+4. Con conexión a Internet, ejecuta:
+
+   npm ci
+
+   Este comando descarga las dependencias definidas en package-lock.json
+   y vuelve a crear la carpeta node_modules.
+5. Inicia el proyecto con:
+
+   npm start
+
+La carpeta node_modules ocupará espacio nuevamente al instalarse.
+Este archivo de instrucciones es el único archivo añadido.
