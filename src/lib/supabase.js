@@ -14,7 +14,7 @@ const key =
 
 if (!url || !key) {
   throw new Error(
-    'Faltan EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_KEY en tu .env'
+    'Faltan EXPO_PUBLIC_SUPABASE_URL'
   );
 }
 
