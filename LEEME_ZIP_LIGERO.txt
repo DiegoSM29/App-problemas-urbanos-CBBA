@@ -1,0 +1,13 @@
+ZIP LIGERO — INCIDENCIAS URBANAS
+
+Se ha excluido únicamente la carpeta node_modules, que contiene dependencias instalables con npm.
+Los archivos originales del código, configuración, SQL, pruebas y documentación se conservan sin cambios, incluidos package.json y package-lock.json.
+
+Para ejecutar el proyecto:
+1. Descomprime este ZIP.
+2. Con Node.js y npm instalados, abre una terminal dentro de la carpeta Incidencias_Urbanas_Last.
+3. Ejecuta: npm ci
+   Se necesita conexión a Internet para descargar las dependencias.
+4. Cuando termine, ejecuta: npm start
+
+Este archivo explica la reducción del ZIP; no se han cambiado los archivos originales del proyecto.
