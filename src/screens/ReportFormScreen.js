@@ -1,0 +1,631 @@
+import React, { useMemo, useState } from 'react';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import * as Location from 'expo-location';
+import { colors, categories } from '../theme/colors';
+import { useAuth } from '../context/AuthContext';
+import { useReports } from '../context/ReportsContext';
+import { useFiltrosMapa } from '../hooks/useFiltrosMapa';
+import { CRITERIOS_FORMULARIO } from '../lib/filtros';
+import MapFilters from '../components/MapFilters';
+import CityMap from '../components/MapView';
+import { LIMITS, limitText, MAX_IMAGE_MB } from '../lib/limits';
+import { duplicadoDe, mensajeDuplicado } from '../lib/duplicados';
+import {
+  isInsideCochabamba,
+  describeOutOfBounds,
+  OUTSIDE_CITY_MESSAGE,
+} from '../lib/region';
+import {
+  pickFromLibrary,
+  captureFromCamera,
+  previewUri,
+} from '../services/images';
+import {
+  getBrowserPosition,
+  GEO_MESSAGES,
+} from '../services/geolocation';
+
+export default function ReportFormScreen({ onSubmit }) {
+  const { user } = useAuth();
+  const { create } = useReports();
+  // El mapa del formulario no está vacío: muestra las incidencias que ya
+  // están registradas, con los mismos filtros que la pantalla del mapa. Así
+  // el ciudadano ve, antes de enviar, si el problema ya fue reportado (y el
+  // formulario, más abajo, le avisa cuando el punto cae encima de otro del
+  // mismo tipo). La base de datos además rechaza el duplicado.
+  const { filtros, setFiltros, enMapa, filtrados } = useFiltrosMapa();
+
+  const [category, setCategory] = useState('Vialidad');
+  const [title, setTitle] = useState('');
+  const [place, setPlace] = useState('');
+  const [coords, setCoords] = useState(null);
+  const [image, setImage] = useState(null);
+  const [imageAsset, setImageAsset] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
+
+  // Lo que ya está reportado en ese punto y con esa categoría.
+  //
+  // Se calcula en el momento, sin peticiones ni esperas: los pines del mapa
+  // ya están en memoria. Avisar aquí, mientras el ciudadano todavía puede
+  // mover el punto o cambiar de categoría, es la diferencia entre una regla
+  // que se entiende y un error al final del formulario.
+  //
+  // Se comparan TODOS los pines, no los que se ven con los filtros puestos:
+  // que el mapa esté mostrando otra cosa no hace que el duplicado deje de
+  // estar ahí.
+  const duplicado = useMemo(
+    () =>
+      duplicadoDe(
+        { category, lat: coords?.latitude, lng: coords?.longitude },
+        enMapa
+      ),
+    [category, coords, enMapa]
+  );
+  const avisoDuplicado = duplicado ? mensajeDuplicado(duplicado) : '';
+
+  // El GPS puede resolverse en cualquier parte: si quien reporta está de
+  // viaje, el punto no le sirve al municipio. Se avisa con el nombre de lo
+  // que tiene cerca y no se marca nada.
+  const aplicarPosicion = (latitude, longitude) => {
+    if (!isInsideCochabamba(latitude, longitude)) {
+      setCoords(null);
+      setError(describeOutOfBounds(latitude, longitude));
+      return;
+    }
+    setCoords({ latitude, longitude });
+  };
+
+  // El mapa ya no deja elegir fuera de Cochabamba, pero se vuelve a comprobar
+  // aquí: es la última línea antes de que el punto llegue al formulario.
+  const elegirPunto = (c) => {
+    if (!c || !isInsideCochabamba(c.latitude, c.longitude)) {
+      setError(
+        c ? describeOutOfBounds(c.latitude, c.longitude) : OUTSIDE_CITY_MESSAGE
+      );
+      return;
+    }
+    setError('');
+    setCoords(c);
+  };
+
+  // El mapa intentó colocar el marcador fuera del límite (por ejemplo al
+  // arrastrarlo). Solo se muestra el motivo.
+  const avisarFuera = (latitude, longitude) => {
+    setError(describeOutOfBounds(latitude, longitude));
+  };
+
+  const useMyLocation = async () => {
+    setError('');
+    setLocating(true);
+    try {
+      if (Platform.OS === 'web') {
+        const pos = await getBrowserPosition();
+        aplicarPosicion(pos.latitude, pos.longitude);
+        return;
+      }
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Se necesita permiso de ubicación para usar el GPS.');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: 5 });
+      aplicarPosicion(pos.coords.latitude, pos.coords.longitude);
+    } catch (e) {
+      const msg =
+        (e?.message && GEO_MESSAGES[e.message]) ||
+        e?.message ||
+        'No se pudo obtener tu ubicación.';
+      setError(msg);
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const applyAsset = (asset) => {
+    setImage(previewUri(asset));
+    setImageAsset(asset);
+  };
+
+  // El servicio de imágenes ya valida el límite de 15 MB y avisa con un
+  // mensaje claro si la foto pesa demasiado.
+  const pickImage = async () => {
+    setError('');
+    try {
+      const result = await pickFromLibrary();
+      if (result.canceled) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      applyAsset(result.asset);
+    } catch {
+      setError('No se pudo adjuntar la imagen.');
+    }
+  };
+
+  const takePhoto = async () => {
+    setError('');
+    try {
+      const result = await captureFromCamera();
+      if (result.canceled) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      applyAsset(result.asset);
+    } catch {
+      setError('No se pudo tomar la foto.');
+    }
+  };
+
+  const submit = async () => {
+    if (!title.trim()) {
+      setError('Describe brevemente el problema.');
+      return;
+    }
+    if (!place.trim()) {
+      setError('Indica la zona, calle o referencia.');
+      return;
+    }
+    const tooLong =
+      limitText(title, LIMITS.title) || limitText(place, LIMITS.place);
+    if (tooLong) {
+      setError(tooLong);
+      return;
+    }
+    // Última comprobación antes de enviar. La app y la base de datos tienen la
+    // misma regla; si aquí pasara algo, la base lo rechazaría igual, pero con
+    // un error que el ciudadano no entendería.
+    if (coords && !isInsideCochabamba(coords.latitude, coords.longitude)) {
+      setError(describeOutOfBounds(coords.latitude, coords.longitude));
+      return;
+    }
+    // Lo mismo con el duplicado: la categoría elegida y el punto marcado ya
+    // tienen un reporte encima. La base de datos lo rechazaría igual, pero
+    // gastando la subida de la foto y devolviendo un error en bruto.
+    if (duplicado) {
+      setError(avisoDuplicado);
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await create({
+        title: title.trim(),
+        category,
+        place: place.trim(),
+        lat: coords?.latitude ?? null,
+        lng: coords?.longitude ?? null,
+        user_id: user?.id,
+        image_url: image,
+        imageAsset,
+      });
+      setTitle('');
+      setPlace('');
+      setCoords(null);
+      setImage(null);
+      setImageAsset(null);
+      onSubmit('Mis reportes');
+    } catch (e) {
+      setError(e.message || 'No se pudo enviar el reporte.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.flex}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.eyebrow}>NUEVA INCIDENCIA</Text>
+        <Text style={styles.title}>Reportar un problema urbano</Text>
+        <Text style={styles.description}>
+          Tu reporte ayuda a priorizar las necesidades de cada zona de
+          Cochabamba.
+        </Text>
+
+        <Text style={styles.fieldLabel}>Categoría</Text>
+        <View style={styles.categories}>
+          {categories
+            .filter((c) => c !== 'Todos')
+            .map((c) => {
+              const active = category === c;
+              return (
+                <Pressable
+                  key={c}
+                  onPress={() => setCategory(c)}
+                  style={[styles.category, active && styles.categoryActive]}
+                >
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      active && styles.categoryTextActive,
+                    ]}
+                  >
+                    {c}
+                  </Text>
+                </Pressable>
+              );
+            })}
+        </View>
+
+        <Text style={styles.fieldLabel}>Descripción del problema</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Ej. Bache grande en la avenida..."
+          placeholderTextColor={colors.placeholder}
+          multiline
+          maxLength={LIMITS.title}
+          value={title}
+          onChangeText={setTitle}
+          editable={!busy}
+        />
+        <Text style={styles.counter}>
+          {title.length}/{LIMITS.title}
+        </Text>
+
+        <Text style={styles.fieldLabel}>Ubicación</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Zona, calle o referencia"
+          placeholderTextColor={colors.placeholder}
+          maxLength={LIMITS.place}
+          value={place}
+          onChangeText={setPlace}
+          editable={!busy}
+        />
+        <Text style={styles.counter}>
+          {place.length}/{LIMITS.place}
+        </Text>
+
+        <Text style={styles.fieldLabel}>Ubicación en el mapa</Text>
+        <MapFilters
+          value={filtros}
+          onChange={setFiltros}
+          visibles={filtrados.length}
+          total={enMapa.length}
+          criterios={CRITERIOS_FORMULARIO}
+        />
+        <CityMap
+          reports={filtrados}
+          onSelect={elegirPunto}
+          onOutOfBounds={avisarFuera}
+          selectedCoords={coords}
+          height={240}
+        />
+        <Text style={styles.coordsHint}>
+          Los puntos de colores son incidencias que ya están registradas.
+        </Text>
+
+        {/*
+          El aviso va pegado al mapa y no solo al final del formulario: el
+          duplicado se ve al marcar el punto, y es justo ahí donde se puede
+          corregir (moviendo el pinchazo o eligiendo otra categoría).
+        */}
+        {avisoDuplicado && (
+          <View style={styles.avisoBox}>
+            <Text style={styles.avisoTitle}>Este problema ya está reportado</Text>
+            <Text style={styles.avisoText}>{avisoDuplicado}</Text>
+            <Text style={styles.avisoPista}>
+              Marca el punto un poco más lejos o cuenta el problema con otra
+              categoría si es otro el que quieres avisar.
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.locationRow}>
+          <Pressable
+            style={[styles.locationButton, (busy || locating) && styles.disabled]}
+            onPress={useMyLocation}
+            disabled={busy || locating}
+          >
+            <Text style={styles.locationButtonText}>
+              {locating ? 'Localizando…' : '◎ Usar mi ubicación'}
+            </Text>
+          </Pressable>
+          {coords && (
+            <Pressable
+              style={styles.clearButton}
+              onPress={() => setCoords(null)}
+              disabled={busy || locating}
+            >
+              <Text style={styles.clearButtonText}>Limpiar</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <Text style={styles.coordsHint}>
+          {Platform.OS === 'web'
+            ? 'Haz clic en el mapa para marcar el punto exacto dentro de Cochabamba, o usa tu ubicación.'
+            : 'Presiona el mapa para marcar el punto exacto dentro de Cochabamba, o usa tu ubicación actual.'}
+        </Text>
+
+        <Text style={styles.fieldLabel}>
+          Evidencia fotográfica (opcional, máx. {MAX_IMAGE_MB} MB)
+        </Text>
+        {image ? (
+          <View style={styles.imageWrap}>
+            <Image source={{ uri: image }} style={styles.image} resizeMode="cover" />
+            <Pressable
+              style={styles.removeImage}
+              onPress={() => {
+                setImage(null);
+                setImageAsset(null);
+              }}
+              disabled={busy}
+            >
+              <Text style={styles.removeImageText}>Quitar imagen</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.photoRow}>
+            <Pressable
+              style={[styles.imageButton, styles.photoButton, busy && styles.disabled]}
+              onPress={takePhoto}
+              disabled={busy}
+            >
+              <Text style={styles.imageButtonText}>📷 Tomar foto</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.imageButton, styles.photoButton, busy && styles.disabled]}
+              onPress={pickImage}
+              disabled={busy}
+            >
+              <Text style={styles.imageButtonText}>+ Galería</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {!!error && <Text style={styles.error}>{error}</Text>}
+
+        <Pressable
+          style={[styles.submit, busy && styles.disabled]}
+          onPress={submit}
+          disabled={busy}
+        >
+          <Text style={styles.submitText}>
+            {busy ? 'Enviando…' : 'Enviar reporte'}
+          </Text>
+        </Pressable>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+  container: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 34,
+  },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.6,
+    fontWeight: '900',
+    color: colors.accent,
+    marginBottom: 6,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  description: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.textMuted,
+    marginBottom: 20,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  categories: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  category: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 9,
+    backgroundColor: '#F3F7F8',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  categoryActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  categoryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  categoryTextActive: {
+    color: '#FFFFFF',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: colors.text,
+    backgroundColor: '#FFFFFF',
+    textAlignVertical: 'top',
+  },
+  coords: {
+    fontSize: 11,
+    color: colors.success,
+    marginTop: 8,
+    fontWeight: '700',
+  },
+  coordsHint: {
+    fontSize: 11,
+    color: colors.textFaint,
+    marginTop: 8,
+  },
+  // El aviso de duplicado. No usa el rojo de `error` a propósito: aquí no
+  // hubo ningún fallo, el reporte está bien escrito, simplemente ese problema
+  // ya está en la cola. Por eso va en ámbar y no como error de envío.
+  avisoBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: '#FFF8EC',
+    gap: 4,
+  },
+  avisoTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  avisoText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
+  avisoPista: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textFaint,
+    marginTop: 2,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  locationButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: '#F7FBFD',
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  locationButtonText: {
+    color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  clearButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  clearButtonText: {
+    color: colors.textMuted,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  demoNote: {
+    color: colors.purple,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  imageButton: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderStyle: 'dashed',
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: 'center',
+    backgroundColor: '#F7FBFD',
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  photoButton: {
+    flex: 1,
+  },
+  imageButtonText: {
+    color: colors.accent,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  imageWrap: {
+    gap: 8,
+  },
+  image: {
+    width: '100%',
+    height: 200,
+    borderRadius: 10,
+    backgroundColor: colors.hero,
+  },
+  removeImage: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
+  removeImageText: {
+    color: colors.danger,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  error: {
+    color: colors.danger,
+    fontSize: 12,
+    marginTop: 12,
+  },
+  counter: {
+    fontSize: 10,
+    color: colors.placeholder,
+    textAlign: 'right',
+    marginTop: 3,
+    marginBottom: -4,
+  },
+  submit: {
+    marginTop: 20,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  disabled: {
+    opacity: 0.6,
+  },
+  submitText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+});

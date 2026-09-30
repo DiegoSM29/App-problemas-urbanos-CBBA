@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+dist/
+web-build/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Base de datos descartable que levanta pruebas/verificar-todo.sh
+pruebas-incidencias/
